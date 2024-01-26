@@ -44,7 +44,7 @@ async def start(ctx, *, word):
         "guessed": [],
         "lives": 6,
         "creator_id": ctx.author.id,
-        "current_status": ["_"] * len(word)
+        "current_status": ["X"] * len(word)
     }
     length = len(word)
     await ctx.send("Welcome to Hangman! The word is " + str(length) + " letters long" + ". Guess a letter by typing #guess <letter>")
