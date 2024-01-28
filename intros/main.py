@@ -42,26 +42,41 @@ c.execute('''
     CREATE TABLE IF NOT EXISTS user_links (
         user_id INTEGER PRIMARY KEY,
         link TEXT
+        outro TEXT
     )
 ''')
 conn.commit()
-
+# c.execute('ALTER TABLE user_links ADD COLUMN outro TEXT') you wont need this if you download the code
+# conn.commit()
 @bot.command()
 async def intro(ctx, link: str):
     """Set the user's YouTube link."""
     c.execute('INSERT OR REPLACE INTO user_links VALUES (?, ?)', (ctx.author.id, link))
     conn.commit()
     await ctx.send(f"Intro set for {ctx.author.name}!")
+@bot.command()
+async def outro(ctx, link: str):
+    """Set the user's YouTube outro."""
+    c.execute('UPDATE user_links SET outro = ? WHERE user_id = ?', (link, ctx.author.id))
+    conn.commit()
+    await ctx.send(f"Outro set for {ctx.author.name}!")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
     """Play the user's YouTube link when they join a voice channel."""
     c.execute('SELECT link FROM user_links WHERE user_id = ?', (member.id,))
     link = c.fetchone()
-    if link is not None and before.channel is None and after.channel is not None:
-        voice_channel = after.channel
+    c.execute('SELECT outro FROM user_links WHERE user_id = ?', (member.id,))
+    outro = c.fetchone()
+    if link is not None or outro is not None:
+        if before.channel is None and after.channel is not None and link is not None:  # User joined a voice channel
+            voice_channel = after.channel
+        elif before.channel is not None and after.channel is None and outro is not None: 
+            voice_channel = before.channel
+        else:
+            return
         voice_client = await voice_channel.connect()
-        yt = YouTube(link[0])
+        yt = YouTube(outro[0])
         stream = yt.streams.filter(only_audio=True).first()
         filename = stream.default_filename
         stream.download(filename=filename)
