@@ -1,3 +1,6 @@
+
+# This is a simple bot that plays a YouTube link when a user joins or leaves a channel. please use the cloud if your friends decide to link bomb you or have a large server.
+
 import asyncio
 import sqlite3
 from discord.ext import commands
