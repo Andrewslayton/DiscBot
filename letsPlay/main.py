@@ -15,7 +15,7 @@ intents.reactions = True
 intents.members = True
 intents.presences = True
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='..', intents=intents)
 
 def get_top_games_by_genre(genre):
     data_request = {
@@ -45,18 +45,17 @@ async def vote(ctx, *, genre: str):
     else:
         await ctx.send("No games found for the specified genre.")
 
-@tasks.loop(minutes=1)
+@tasks.loop(hours = 24)
 async def ask_for_genre():
     for guild in bot.guilds:
         channel = discord.utils.get(guild.channels , name='gameofday')
-        print(channel)
         if not channel:
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 guild.me: discord.PermissionOverwrite(read_messages=True)
             }
             channel = await guild.create_text_channel('gameofday', overwrites=overwrites)
-            await channel.send("Please enter a genre for today's game vote.")
+        await channel.send("Please enter a genre for today's game vote.")
 
 @ask_for_genre.before_loop
 async def before_ask_for_genre():
@@ -65,6 +64,41 @@ async def before_ask_for_genre():
 @bot.event
 async def on_ready():
     ask_for_genre.start()
+
+
+@bot.command()
+async def genres(ctx):
+    genres = [
+        "Action", "Adventure", "Casual", "Indie", "Massively Multiplayer",
+        "Racing", "RPG", "Simulation", "Sports", "Strategy",
+        "Horror", "Puzzle", "Arcade", "Platformer", "Visual Novel",
+        "Survival", "Open World", "Fantasy", "Sci-fi", "Historical",
+        "Stealth", "Fighting", "Shooter", "Exploration", "Point & Click",
+        "Music", "Educational", "Card Game", "Tower Defense", "War",
+        "Mystery", "Hack and Slash", "Battle Royale", "Tactical",
+        "Rogue-lite", "Metroidvania", "Life Simulation", "City Builder",
+        "Noir", "Western", "Cyberpunk", "Space", "Superhero",
+        "Military", "Anime", "Zombies", "Voxel", "Pixel Graphics",
+        "Cyberpunk", "Survival Horror", "Post-apocalyptic", "Fantasy",
+        "Mystery Dungeon", "Time Travel", "Space Exploration", "Aliens",
+        "Lovecraftian", "Dystopian", "Alternate History", "Medieval",
+        "Mythology", "Gothic", "Crime", "Psychological Horror", "Dinosaurs",
+        "Sandbox", "Trading Card Game", "Swordplay", "RTS", "Turn-Based",
+        "Logic", "Naval", "Naval Combat", "Economy", "Political",
+        "Competitive", "Sailing", "Exploration", "Tower Climbing", "Cooking",
+        "Magic", "Mythical Creatures", "Dragons", "Vikings", "Samurai",
+        "Ninjas", "Hacking", "Espionage", "Martial Arts", "Space Opera",
+        "J-RPG", "MMO", "Real-Time", "Real-Time Tactics", "Time Management",
+        "Trading", "Economic", "Investigation", "Episodic", "Post-Post-Apocalyptic",
+        "Survival Crafting", "Grand Strategy", "Political Simulation", "Naval Battles",
+        "Space Sim", "Space Combat", "Hacking", "Espionage", "Martial Arts",
+        "Space Opera", "J-RPG", "MMO", "Real-Time", "Real-Time Tactics",
+        "Time Management", "Trading", "Economic", "Investigation", "Episodic",
+        "Post-Post-Apocalyptic", "Survival Crafting", "Grand Strategy",
+        "Political Simulation", "Naval Battles", "Space Sim", "Space Combat"
+    ]
+    await ctx.send("Available genres: " + ", ".join(genres))
+
 
 @bot.event
 async def on_message(message):
@@ -81,7 +115,6 @@ async def on_message(message):
             await message.channel.send(f"Vote for {game_name}: {game_link}")
         else:
             await message.channel.send("No games found for the specified genre.")
-
     await bot.process_commands(message)
 
 bot.run(BOT_TOKEN)
