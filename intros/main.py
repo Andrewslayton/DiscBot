@@ -22,7 +22,7 @@ intents.reactions = True
 intents.members = True
 intents.presences = True
 intents.message_content = True 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!!!', intents=intents)
 
 ydl_opts = {
     'format': 'bestaudio',

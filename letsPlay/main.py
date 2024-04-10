@@ -17,10 +17,10 @@ intents.presences = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='..', intents=intents)
 
-def get_top_games_by_genre(genre):
+def get_top_games_by_genre(tag):
     data_request = {
-        'request': 'genre',
-        'genre': genre
+        'request': 'tag',
+        'tag': tag
     }
     data = steamspypi.download(data_request)
     if data:

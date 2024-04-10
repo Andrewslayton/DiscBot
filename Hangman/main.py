@@ -18,7 +18,7 @@ intents.reactions = True
 intents.members = True
 intents.presences = True
 intents.message_content = True 
-bot = commands.Bot(command_prefix='#', intents=intents)
+bot = commands.Bot(command_prefix='###', intents=intents)
 hangman_game = {}
 
 Base = declarative_base()
@@ -34,6 +34,7 @@ engine = create_engine('sqlite:///hangman.db')
 Base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)
+
 
 @bot.command()
 async def start(ctx, *, word):
@@ -96,7 +97,7 @@ async def guess(ctx, *, letter):
             game["current_status"][i] = letter
     await ctx.send("Current status: " + "".join(game["current_status"]))
     
-    
+
 @bot.command()
 async def leaderboard(ctx):
     session = Session()
