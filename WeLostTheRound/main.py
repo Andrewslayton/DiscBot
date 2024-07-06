@@ -6,8 +6,7 @@ import os
 from discord import FFmpegPCMAudio
 
 load_dotenv()
-TARGET_USER_ID = os.getenv('TARGET_USER_ID')
-BOT_TOKEN = os.getenv('BOT_TOKEN3')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 intents = discord.Intents.default()
 intents.messages = True  
@@ -26,20 +25,9 @@ async def lost(ctx,):
     if ctx.voice_client is not None:
         await ctx.voice_client.disconnect()
     voice_client = await voice_channel.connect()
-    audio_source = FFmpegPCMAudio(r'C:\Users\the tank\Downloads\we_lost_the_round.wav')
+    audio_source = FFmpegPCMAudio(r'we_lost_the_round.wav')
     voice_client.play(audio_source)
     voice_client.disconnect()
     
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if before.channel is None and after.channel is not None:
-        voice_channel = after.channel
-        if voice_channel is not None:
-            if voice_channel.guild.voice_client is not None:
-                await voice_channel.guild.voice_client.disconnect()
-            voice_client = await voice_channel.connect()
-            audio_source = FFmpegPCMAudio(r'C:\Users\the tank\Downloads\we_lost_the_round.wav')
-            voice_client.play(audio_source)
-            voice_client.disconnect()
 
 bot.run(BOT_TOKEN)

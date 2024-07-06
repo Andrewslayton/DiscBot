@@ -8,3 +8,20 @@ services:
       - BOT_TOKEN=${HANGMAN_TOKEN}
     restart: unless-stopped
 
+  intro: #Docker compose for intro
+    build:
+      context: ./intros
+      dockerfile: Dockerfile
+    environment:
+      - BOT_TOKEN=${INTRO_TOKEN}
+    restart: unless-stopped
+
+  welosttheround: #Docker compose we lost the round 
+    build:
+      context: ./WeLostTheRound
+      dockerfile: Dockerfile
+    environment:
+      - BOT_TOKEN=${WE_LOST_THE_ROUND_TOKEN}
+    restart: unless-stopped
+  
+

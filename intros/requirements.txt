@@ -1,0 +1,6 @@
+discord.py
+yt-dlp
+python-dotenv
+youtube_dl
+pytube
+PyNaCl
