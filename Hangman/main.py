@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 
 load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN2')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 intents = discord.Intents.default()
 intents.messages = True  
