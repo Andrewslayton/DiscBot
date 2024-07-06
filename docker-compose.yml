@@ -1,0 +1,10 @@
+
+services:
+  hangman: #Docker compose for Hangman
+    build:
+      context: /Hangman
+      dockerfile: Dockerfile
+    environment:
+      - BOT_TOKEN=${HANGMAN_TOKEN}
+    restart: unless-stopped
+
