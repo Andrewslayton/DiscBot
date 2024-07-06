@@ -2,7 +2,7 @@
 services:
   hangman: #Docker compose for Hangman
     build:
-      context: /Hangman
+      context: ./Hangman
       dockerfile: Dockerfile
     environment:
       - BOT_TOKEN=${HANGMAN_TOKEN}
