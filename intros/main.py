@@ -1,6 +1,3 @@
-
-# This is a simple bot that plays a YouTube link when a user joins or leaves a channel. please use the cloud if your friends decide to link bomb you or have a large server.
-
 import asyncio
 import sqlite3
 from discord.ext import commands
@@ -9,10 +6,10 @@ from yt_dlp import YoutubeDL
 import discord
 from dotenv import load_dotenv
 import os
-from pytube import YouTube
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN4')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -26,7 +23,15 @@ bot = commands.Bot(command_prefix='!!!', intents=intents)
 ydl_opts = {
     'format': 'bestaudio',
     'ignoreerrors': True,
-    'verbose': True
+    'verbose': True,
+    'outtmpl': '%(id)s.%(ext)s',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+    'ffmpeg_location': '/usr/bin/ffmpeg',
+    'external_downloader_args': ['-loglevel', 'repeat+info']
 }
 
 conn = sqlite3.connect('user_links.db')
@@ -50,6 +55,8 @@ except sqlite3.OperationalError:
 
 conn.commit()
 
+executor = ThreadPoolExecutor()
+
 @bot.command()
 async def intro(ctx, link: str):
     """Set the user's YouTube link."""
@@ -63,6 +70,13 @@ async def outro(ctx, link: str):
     c.execute('UPDATE user_links SET outro = ? WHERE user_id = ?', (link, ctx.author.id))
     conn.commit()
     await ctx.send(f"Outro set for {ctx.author.name}!")
+
+def download_audio(play_link, ydl_opts):
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(play_link, download=False)
+        filename = ydl.prepare_filename(info)
+        ydl.download([play_link])
+    return filename
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -87,15 +101,19 @@ async def on_voice_state_update(member, before, after):
             if voice_client and voice_client.is_connected():
                 await voice_client.disconnect()
             voice_client = await voice_channel.connect()
-            yt = YouTube(play_link)
-            stream = yt.streams.filter(only_audio=True).first()
-            filename = stream.default_filename
-            stream.download(filename=filename)
-            voice_client.play(discord.FFmpegPCMAudio(filename))
+
+            loop = asyncio.get_running_loop()
+            filename = await loop.run_in_executor(executor, download_audio, play_link, ydl_opts)
+
+            mp3_filename = filename.replace('.webm', '.mp3')
+            if not os.path.isfile(mp3_filename):
+                raise FileNotFoundError(f"The file {mp3_filename} was not found")
+
+            voice_client.play(discord.FFmpegPCMAudio(mp3_filename))
             while voice_client.is_playing():
                 await asyncio.sleep(1)
             await voice_client.disconnect()
-            os.remove(filename)
+            os.remove(mp3_filename)
         except Exception as e:
             print(f"Failed to connect or play audio: {e}")
 

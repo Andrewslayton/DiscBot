@@ -1,4 +1,5 @@
 import discord
+import asyncio
 from discord.ext import commands
 import base64
 from dotenv import load_dotenv
@@ -27,7 +28,9 @@ async def lost(ctx,):
     voice_client = await voice_channel.connect()
     audio_source = FFmpegPCMAudio(r'we_lost_the_round.wav')
     voice_client.play(audio_source)
-    voice_client.disconnect()
+    while voice_client.is_playing():
+        await asyncio.sleep(1)
+    await voice_client.disconnect()
     
 
 bot.run(BOT_TOKEN)

@@ -1,7 +1,7 @@
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y ffmpeg
+
 
 # Set the working directory in the container
 WORKDIR /app
@@ -10,6 +10,7 @@ WORKDIR /app
 COPY . .
 
 # Install any needed packages specified in requirements.txt
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Run bot.py when the container launches
