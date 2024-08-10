@@ -1,27 +1,36 @@
 
 services:
-  hangman: #Docker compose for Hangman
-    build:
-      context: ./Hangman
-      dockerfile: Dockerfile
-    environment:
-      - BOT_TOKEN=${HANGMAN_TOKEN}
-    restart: unless-stopped
+  # hangman: #Docker compose for Hangman
+  #   build:
+  #     context: ./Hangman
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - BOT_TOKEN=${HANGMAN_TOKEN}
+  #   restart: unless-stopped
 
-  intro: #Docker compose for intro
-    build:
-      context: ./intros
-      dockerfile: Dockerfile
-    environment:
-      - BOT_TOKEN=${INTRO_TOKEN}
-    restart: unless-stopped
+  # intro: #Docker compose for intro
+  #   build:
+  #     context: ./intros
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - BOT_TOKEN=${INTRO_TOKEN}
+  #   restart: unless-stopped
 
-  welosttheround: #Docker compose we lost the round 
+  # welosttheround: #Docker compose we lost the round 
+  #   build:
+  #     context: ./WeLostTheRound
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - BOT_TOKEN=${WE_LOST_THE_ROUND_TOKEN}
+  #   restart: unless-stopped
+    
+  drusic:
     build:
-      context: ./WeLostTheRound
+      context: ./drusic
       dockerfile: Dockerfile
     environment:
-      - BOT_TOKEN=${WE_LOST_THE_ROUND_TOKEN}
+      - BOT_TOKEN=${DRUSIC_TOKEN}
+    volumes:
+      - ./drusic/data:/app/data
     restart: unless-stopped
-  
 
