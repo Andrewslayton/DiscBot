@@ -10,7 +10,8 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from YTDL import YTDLSource 
 
-bot = commands.Bot(command_prefix='///', intents=discord.Intents.all())
+bot = commands.Bot(command_prefix='d/', intents=discord.Intents.all())
+
 
 load_dotenv()
 
@@ -32,17 +33,30 @@ if not os.path.exists(DOWNLOAD_DIR):
 song_queue = Queue()
 
 @bot.command()
+async def help(ctx):
+    help = '''
+    common problems (you guys are going to give me a headache i already know)
+    -once all songs are concluded and bots dont already connected do d/playlistend
+    -if bot is being "weird" hit it with d/playlistend and then leave it be for a few minutes
+    -playlists take a long time to download and i will remove ability to make playlists for people who abuse it
+    -if all else fails ping me 
+    '
+    '''
+    await ctx.send(help)
+
+@bot.command()
 async def commands(ctx):
     cmds = '''
     **Available Commands:**
-    - ///play [song name or URL]: Play a song, accepts spotify playlist links youtube playlist links and soundcloud playlist link. Upon no link will search youtube.
-    - ///playlist [playlist name]: Create a new playlist.
-    - ///playlistadd [playlist name] [song name or URL]: Add a song to the playlist.
-    - ///playlistshow [playlist name]: Show all songs in a playlist.
-    - ///playlistplay [playlist name]: Play all songs in a playlist.
-    - ///playlistskip: Vote to skip the current song in the playlist.
-    - ///playlistend: End the current playlist.
-    - ///commands: Show this list of commands.
+    - d/play [song name or URL]: Play a song, accepts spotify playlist links youtube playlist links and soundcloud playlist link. Upon no link will search youtube.
+    - d/playlist [playlist name]: Create a new playlist.
+    - d/playlistadd [playlist name] [song name or URL]: Add a song to the playlist.
+    - d/playlistshow [playlist name]: Show all songs in a playlist.
+    - d/playlistplay [playlist name]: Play all songs in a playlist.
+    - d/playlistskip: Vote to skip the current song in the playlist.
+    - d/playlistend: End the current playlist.
+    - d/help
+    - d/commands: Show this list of commands.
     '''
     await ctx.send(cmds)
 
@@ -63,7 +77,9 @@ async def play_next(ctx, vc):
         vc.play(source, after=after_playing)
         await ctx.send(f"Now playing: {source.title}")
     else:
-        await vc.disconnect()
+        await asyncio.sleep(10)
+        if song_queue.empty() and not vc.is_connected():
+            await vc.disconnect()
 
 @bot.command()
 async def play(ctx, *, search: str):
@@ -102,27 +118,60 @@ async def playlist(ctx, name: str):
 async def playlistend(ctx):
     vc = ctx.voice_client
     if vc and vc.is_playing():
-        vc.stop()  
-    await song_queue.put(None) 
-    await song_queue.join()  
-    await ctx.send("Playlist has been ended.")
+        vc.stop()  # Stop the current song
+
+    # Clear the song queue completely
+    while not song_queue.empty():
+        song_queue.get_nowait()  # Remove all songs from the queue
+
+    # Disconnect the bot from the voice channel
+    if vc and vc.is_connected():
+        await vc.disconnect()
+
+    await ctx.send("Playlist has been ended")
     
 @bot.command()
 async def playlistadd(ctx, name: str, *, search: str):
     c.execute("SELECT songs FROM playlists WHERE name=?", (name,))
     row = c.fetchone()
     if row:
-        sources = await YTDLSource.create_source(search, loop=bot.loop)
-        for source in sources:
-            file_path = f"{DOWNLOAD_DIR}/{source.title}.mp3"
-            with open(file_path, "wb") as f:
-                f.write(source.data)
-            new_songs = row[0] + "," + file_path if row[0] else file_path
-            c.execute("UPDATE playlists SET songs=? WHERE name=?", (new_songs, name))
-            conn.commit()
-        await ctx.send(f"Added song '{source.title}' to playlist '{name}'!")
+        max_filesize = 15 * 1024 * 1024  # 15 MB limit
+
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'ignoreerrors': True,
+            'nocheckcertificate': True,
+            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'match_filter': youtube_dl.utils.match_filter_func(f"filesize <= {max_filesize}"),
+            'default_search': 'ytsearch',  # Enables YouTube search if a direct URL is not provided
+        }
+
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(search, download=True)
+            if not info:
+                await ctx.send(f"Could not find any results for {search}.")
+                return
+
+            if 'entries' in info:  
+                entries = info['entries']
+            else: 
+                entries = [info]
+
+            for entry in entries:
+                file_path = os.path.join(DOWNLOAD_DIR, f"{entry['title']}.mp3")
+                new_songs = row[0] + "," + file_path if row[0] else file_path
+                c.execute("UPDATE playlists SET songs=? WHERE name=?", (new_songs, name))
+                conn.commit()
+
+                await ctx.send(f"Added '{entry['title']}' to playlist '{name}'!")
     else:
         await ctx.send("Playlist not found!")
+
 
 @bot.command()
 async def playlistshow(ctx, name: str):
@@ -146,12 +195,11 @@ async def playlistplay(ctx, name: str):
         if not voice_channel:
             await ctx.send("You're not in a voice channel!")
             return
-
         vc = await voice_channel.connect()
-
         songs = row[0].split(',')
         for song in songs:
-            await song_queue.put(song)
+            audio_source = discord.FFmpegPCMAudio(song)
+            await song_queue.put(audio_source)
         
         await play_next(ctx, vc)
         await ctx.send(f"Playing playlist '{name}'!")
@@ -230,7 +278,11 @@ async def spotifyplay(ctx, link: str):
             sources = await YTDLSource.create_source(search_query, loop=bot.loop)
             for source in sources:
                 await song_queue.put(source)
-                await play_next(ctx, vc)
+                if not vc.is_playing(): 
+                    await play_next(ctx, vc)
+                while vc.is_playing():
+                    await asyncio.sleep(1)
+
 
         for item in tracks:
             await download_and_play_track(item)
@@ -249,7 +301,8 @@ async def spotifyplay(ctx, link: str):
             sources = await YTDLSource.create_source(search_query, loop=bot.loop)
             for source in sources:
                 await song_queue.put(source)
-                await play_next(ctx, vc)
+                if not vc.is_playing(): 
+                    await play_next(ctx, vc)
                 while vc.is_playing():
                     await asyncio.sleep(1)
 
