@@ -33,8 +33,8 @@ if not os.path.exists(DOWNLOAD_DIR):
 song_queue = Queue()
 
 @bot.command()
-async def help(ctx):
-    help = '''
+async def issue(ctx):
+    issue = '''
     common problems (you guys are going to give me a headache i already know)
     -once all songs are concluded and bots dont already connected do d/playlistend
     -if bot is being "weird" hit it with d/playlistend and then leave it be for a few minutes
@@ -42,7 +42,7 @@ async def help(ctx):
     -if all else fails ping me 
     '
     '''
-    await ctx.send(help)
+    await ctx.send(issue)
 
 @bot.command()
 async def commands(ctx):
@@ -55,7 +55,7 @@ async def commands(ctx):
     - d/playlistplay [playlist name]: Play all songs in a playlist.
     - d/playlistskip: Vote to skip the current song in the playlist.
     - d/playlistend: End the current playlist.
-    - d/help
+    - d/issue: issue help
     - d/commands: Show this list of commands.
     '''
     await ctx.send(cmds)

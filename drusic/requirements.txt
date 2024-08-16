@@ -4,3 +4,4 @@ python-dotenv
 youtube_dl
 PyNaCl
 pytube
+spotipy
