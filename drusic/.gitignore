@@ -1,2 +1,6 @@
 data
 downloads
+.cache
+.__pycache__
+*.pyc
+drusic/__pycache__/YTDL.cpython-312.pyc

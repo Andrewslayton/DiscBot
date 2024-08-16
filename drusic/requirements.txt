@@ -2,4 +2,5 @@ discord.py
 yt-dlp
 python-dotenv
 youtube_dl
+PyNaCl
 pytube
