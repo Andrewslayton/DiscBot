@@ -1,2 +1,5 @@
-Drusic is a music bot that supports playlist creation
-stores mp3 files of songs locally in order to quickly draw upon them in the case of youtube_dl being down
+Drusic is your own runnable discord music bot.
+Whats the point??
+ -create and save playlists.
+
+Must provide API key 

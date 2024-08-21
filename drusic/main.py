@@ -195,7 +195,12 @@ async def playlistplay(ctx, name: str):
         if not voice_channel:
             await ctx.send("You're not in a voice channel!")
             return
-        vc = await voice_channel.connect()
+        if ctx.voice_client is None:
+            vc = await voice_channel.connect()
+        else:
+            vc = ctx.voice_client
+        if vc.channel != voice_channel:
+            await vc.move_to(voice_channel)
         songs = row[0].split(',')
         for song in songs:
             audio_source = discord.FFmpegPCMAudio(song)
