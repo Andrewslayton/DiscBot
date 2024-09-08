@@ -39,6 +39,7 @@ if not os.path.exists(DOWNLOAD_DIR):
 song_queue = Queue()
 current_song = None
 current_artist = None
+looping = False
 @bot.command()
 async def issue(ctx):
     issue = '''
@@ -68,6 +69,8 @@ async def commands(ctx):
     await ctx.send(cmds)
     
 async def play_next(ctx, vc):
+    global looping
+
     if not vc.is_connected():
         return
 
@@ -103,6 +106,9 @@ async def play_next(ctx, vc):
             embed.add_field(name="Lyrics", value="No lyrics found.", inline=False)
 
         await ctx.send(embed=embed)
+
+        if looping:
+            await song_queue.put(source)
 
     else:
         await asyncio.sleep(10)
@@ -140,6 +146,18 @@ async def p(ctx, *, search: str):
 
         if not vc.is_playing():
             await play_next(ctx, vc)
+
+@bot.command()
+async def loop(ctx):
+    global current_song, current_artist, looping
+    sources = await YTDLSource.create_source(current_song, loop=bot.loop)
+    vc = ctx.voice_client
+    for source in sources:
+        await song_queue.put(source)
+    if vc is None or not vc.is_connected():
+        await ctx.send("Bot is not connected to a voice channel.")
+        return
+
 
 def clean_title(title):
     cleaned_title = re.sub(r'\(.*?\)', '', title)
