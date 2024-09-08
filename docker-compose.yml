@@ -32,6 +32,7 @@ services:
       - BOT_TOKEN=${DRUSIC_TOKEN}
       - SPOTIFY_TOKEN=${SPOTIFY_TOKEN}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - GENIUS_TOKEN=${GENIUS_TOKEN}
     volumes:
       - ./drusic/data:/app/data
     restart: unless-stopped

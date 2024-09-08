@@ -8,6 +8,11 @@ from asyncio import Queue
 import yt_dlp as youtube_dl  
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import requests
+import lyricsgenius
+import re
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 from YTDL import YTDLSource 
 
 bot = commands.Bot(command_prefix='d/', intents=discord.Intents.all())
@@ -18,8 +23,9 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 SPOTIFY_TOKEN = os.getenv('SPOTIFY_TOKEN')
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+GENIUS_API_KEY = os.getenv('GENIUS_TOKEN')
 spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_TOKEN))
-
+genius = lyricsgenius.Genius(GENIUS_API_KEY, skip_non_songs=True, excluded_terms=["(Remix)", "(Live)"], remove_section_headers=True)
 conn = sqlite3.connect('data/playlists.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS playlists 
@@ -31,7 +37,8 @@ if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
 song_queue = Queue()
-
+current_song = None
+current_artist = None
 @bot.command()
 async def issue(ctx):
     issue = '''
@@ -48,21 +55,22 @@ async def issue(ctx):
 async def commands(ctx):
     cmds = '''
     **Available Commands:**
-    - d/play [song name or URL]: Play a song, accepts spotify playlist links youtube playlist links and soundcloud playlist link. Upon no link will search youtube.
+    - d/p [song name or URL]: Play a song, accepts spotify playlist links youtube playlist links and soundcloud playlist link. Upon no link will search youtube.
     - d/playlist [playlist name]: Create a new playlist.
     - d/playlistadd [playlist name] [song name or URL]: Add a song to the playlist.
     - d/playlistshow [playlist name]: Show all songs in a playlist.
     - d/playlistplay [playlist name]: Play all songs in a playlist.
-    - d/playlistskip: Vote to skip the current song in the playlist.
-    - d/playlistend: End the current playlist.
+    - d/s: Vote to skip the current song in the playlist.
+    - d/end: End the current playlist.
     - d/issue: issue help
     - d/commands: Show this list of commands.
     '''
     await ctx.send(cmds)
-
+    
 async def play_next(ctx, vc):
-    if not vc.is_connected(): 
+    if not vc.is_connected():
         return
+
     if not song_queue.empty():
         source = await song_queue.get()
 
@@ -75,39 +83,125 @@ async def play_next(ctx, vc):
                 print(f'Error in after_playing: {exc}')
 
         vc.play(source, after=after_playing)
-        await ctx.send(f"Now playing: {source.title}")
+        artist_name, song_title = extract_artist_and_title(source.title)
+        if not artist_name:
+            artist_name = source.data.get('uploader')
+        track_length = source.duration
+        formatted_length = f"{divmod(track_length, 60)[0]}:{divmod(track_length, 60)[1]:02d}" if track_length else "Unknown length"
+
+        embed = discord.Embed(title="Now Playing", color=discord.Color.blue())
+        embed.add_field(name="Song", value=song_title, inline=False)
+        embed.add_field(name="Artist", value=artist_name, inline=False)
+        embed.add_field(name="Duration", value=formatted_length, inline=False)
+
+        lyrics_text = await get_lyrics(song_title, artist_name)
+        if lyrics_text:
+            lyrics_preview = lyrics_text[:300] + "..."  # Limit preview to 300 characters
+            embed.add_field(name="Lyrics Preview", value=lyrics_preview, inline=False)
+            embed.set_footer(text="Use d/lyrics to see the full lyrics!")
+        else:
+            embed.add_field(name="Lyrics", value="No lyrics found.", inline=False)
+
+        await ctx.send(embed=embed)
+
     else:
         await asyncio.sleep(10)
-        if song_queue.empty() and not vc.is_connected():
+        if song_queue.empty() and vc.is_connected():
             await vc.disconnect()
+            await ctx.send("No more tracks. Disconnecting...")
 
 @bot.command()
-async def play(ctx, *, search: str):
+async def p(ctx, *, search: str):
+    global current_song, current_artist
+
     voice_channel = ctx.author.voice.channel
     if not voice_channel:
         await ctx.send("You're not in a voice channel!")
         return
-
     if ctx.voice_client is None:
         vc = await voice_channel.connect()
     else:
         vc = ctx.voice_client
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
-
-    if "spotify.com" in search:
-        await spotifyplay(ctx, search)
-    elif "soundcloud.com" in search:
-        await soundcloudplay(ctx, search)
-    else:
-        sources = await YTDLSource.create_source(search, loop=bot.loop)
     
-        for source in sources:
-            await song_queue.put(source)
-            if not vc.is_playing():
-                await play_next(ctx, vc)
+    sources = await YTDLSource.create_source(search, loop=bot.loop)
 
+    for source in sources:
+        track_length = source.duration
+        if track_length:
+            minutes, seconds = divmod(track_length, 60)
+            formatted_length = f"{minutes}:{seconds:02d}"
+        else:
+            formatted_length = "Unknown length"
+        await song_queue.put(source)
+        current_song = source.title 
+        current_artist = source.data.get('uploader')
 
+        if not vc.is_playing():
+            await play_next(ctx, vc)
+
+def clean_title(title):
+    cleaned_title = re.sub(r'\(.*?\)', '', title)
+    cleaned_title = re.sub(r'#\S+', '', cleaned_title)
+    cleaned_title = re.sub(r'(feat\.|ft\.).*', '', cleaned_title, flags=re.I)
+    cleaned_title = re.sub(r'[-,]+', ' ', cleaned_title).strip()
+    return cleaned_title.strip()
+
+def extract_artist_and_title(title):
+    separators = [' x ', ' ft. ', ' feat. ', ' - ']
+    for sep in separators:
+        if sep in title:
+            parts = title.split(sep, 1)
+            artist_name = parts[0].strip()
+            song_title = clean_title(parts[1])
+            return artist_name, song_title
+
+    artist_name = None
+    song_title = clean_title(title)
+    return artist_name, song_title
+
+async def find_best_match(artist_name, target_song_title):
+    try:
+        print(f"Searching for: {artist_name} - {target_song_title}")
+        song = genius.search_song(target_song_title, artist_name)
+        if song:
+            return song.lyrics  
+        else:
+            print("No exact match found.")
+        return None  
+    except Exception as e:
+        print(f"Error finding best match: {e}")
+        return None
+
+async def get_lyrics(track_name, artist_name):
+    try:
+        cleaned_track_name = clean_title(track_name)
+        lyrics = await find_best_match(artist_name, cleaned_track_name)
+        return lyrics if lyrics else None
+    except Exception as e:
+        return None
+
+@bot.command()
+async def lyrics(ctx):
+    global current_song, current_artist
+    if current_song is None or current_artist is None:
+        await ctx.send("No song is currently playing.")
+        return
+
+    lyrics_text = await get_lyrics(current_song, current_artist)
+
+    if lyrics_text:
+        embed = discord.Embed(title=f"Lyrics for {current_song} by {current_artist}", color=discord.Color.purple())
+        chunks = [lyrics_text[i:i + 1024] for i in range(0, len(lyrics_text), 1024)] 
+
+        for i, chunk in enumerate(chunks):
+            embed.add_field(name=f"Lyrics (Part {i + 1})", value=chunk, inline=False)
+
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"Sorry, no lyrics were found for **{current_song}** by **{current_artist}**.")
+        
 @bot.command()
 async def playlist(ctx, name: str):
     c.execute("INSERT INTO playlists (name, songs) VALUES (?, ?)", (name, ""))
@@ -115,16 +209,12 @@ async def playlist(ctx, name: str):
     await ctx.send(f"Playlist '{name}' created!")
 
 @bot.command()
-async def playlistend(ctx):
+async def end(ctx):
     vc = ctx.voice_client
     if vc and vc.is_playing():
         vc.stop()  # Stop the current song
-
-    # Clear the song queue completely
     while not song_queue.empty():
-        song_queue.get_nowait()  # Remove all songs from the queue
-
-    # Disconnect the bot from the voice channel
+        song_queue.get_nowait() 
     if vc and vc.is_connected():
         await vc.disconnect()
 
@@ -213,7 +303,7 @@ async def playlistplay(ctx, name: str):
 
 
 @bot.command()
-async def playlistskip(ctx):
+async def skip(ctx):
     voice_channel = ctx.author.voice.channel
     if not voice_channel:
         await ctx.send("You're not in a voice channel!")
@@ -224,25 +314,9 @@ async def playlistskip(ctx):
         await ctx.send("No song is currently playing.")
         return
 
-    members = [member for member in voice_channel.members if not member.bot]
-    required_votes = len(members) // 2 + 1
-    votes = 0
-
-    def check(reaction, user):
-        nonlocal votes
-        return user in members and str(reaction.emoji) == '👍'
-
-    message = await ctx.send(f"Vote to skip the current song! {required_votes} votes required.")
-    await message.add_reaction('👍')
-
+    message = await ctx.send(f"skipping song")
     try:
-        while votes < required_votes:
-            reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
-            votes += 1
-            if votes >= required_votes:
-                await ctx.send("Vote passed! Skipping the song.")
-                vc.stop()
-                break
+        vc.stop()
     except asyncio.TimeoutError:
         await ctx.send("Vote timed out. The song will continue playing.")
 
@@ -313,6 +387,8 @@ async def spotifyplay(ctx, link: str):
 
         for item in tracks:
             await download_and_play_track(item)
+    
+
 
 @bot.command()
 async def soundcloudplay(ctx, playlist_url: str):
