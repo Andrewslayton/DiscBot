@@ -76,7 +76,7 @@ async def play_next(ctx, vc):
 
     if not song_queue.empty():
         source = await song_queue.get()
-
+        await ctx.send(f'queue size {song_queue.qsize()}')
         def after_playing(error):
             coro = play_next(ctx, vc)
             fut = asyncio.run_coroutine_threadsafe(coro, ctx.bot.loop)
@@ -92,6 +92,11 @@ async def play_next(ctx, vc):
         track_length = source.duration
         formatted_length = f"{divmod(track_length, 60)[0]}:{divmod(track_length, 60)[1]:02d}" if track_length else "Unknown length"
 
+        sources = await YTDLSource.create_source(current_song, loop=bot.loop)
+        if looping and song_queue.qsize() < 2:
+            for source in sources:
+                await song_queue.put(source)
+                
         embed = discord.Embed(title="Now Playing", color=discord.Color.blue())
         embed.add_field(name="Song", value=song_title, inline=False)
         embed.add_field(name="Artist", value=artist_name, inline=False)
@@ -106,9 +111,6 @@ async def play_next(ctx, vc):
             embed.add_field(name="Lyrics", value="No lyrics found.", inline=False)
 
         await ctx.send(embed=embed)
-
-        if looping:
-            await song_queue.put(source)
 
     else:
         await asyncio.sleep(10)
@@ -150,13 +152,15 @@ async def p(ctx, *, search: str):
 @bot.command()
 async def loop(ctx):
     global current_song, current_artist, looping
-    sources = await YTDLSource.create_source(current_song, loop=bot.loop)
     vc = ctx.voice_client
-    for source in sources:
-        await song_queue.put(source)
     if vc is None or not vc.is_connected():
         await ctx.send("Bot is not connected to a voice channel.")
         return
+    looping = not looping
+    if looping:
+        await ctx.send("looping enabled")
+    else:
+        await ctx.send("looping turned off")
 
 
 def clean_title(title):
