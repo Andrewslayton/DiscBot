@@ -13,6 +13,7 @@ import lyricsgenius
 import re
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
+from discord.ui import Button, View
 from YTDL import YTDLSource 
 
 bot = commands.Bot(command_prefix='d/', intents=discord.Intents.all())
@@ -62,6 +63,7 @@ async def commands(ctx):
     - d/playlistshow [playlist name]: Show all songs in a playlist.
     - d/playlistplay [playlist name]: Play all songs in a playlist.
     - d/s: Vote to skip the current song in the playlist.
+    - d/loop : loops current song until called again
     - d/end: End the current playlist.
     - d/issue: issue help
     - d/commands: Show this list of commands.
@@ -84,6 +86,7 @@ async def play_next(ctx, vc):
                 fut.result()
             except Exception as exc:
                 print(f'Error in after_playing: {exc}')
+                
 
         vc.play(source, after=after_playing)
         artist_name, song_title = extract_artist_and_title(source.title)
@@ -101,16 +104,47 @@ async def play_next(ctx, vc):
         embed.add_field(name="Song", value=song_title, inline=False)
         embed.add_field(name="Artist", value=artist_name, inline=False)
         embed.add_field(name="Duration", value=formatted_length, inline=False)
+        
+        async def loop_button_callback(interaction):
+            global looping
+            looping = not looping
+            status = "enabled" if looping else "disabled"
+            await interaction.response.send_message(f"Looping {status}.", ephemeral=True)
+        
+        async def lyrics_button_callback(interaction):
+            global current_song, current_artist
+            if current_song is None or current_artist is None:
+                await ctx.send("No song is currently playing.")
+                return
+            lyrics_text = await get_lyrics(current_song, current_artist)
+            if lyrics_text:
+                embed = discord.Embed(title=f"Lyrics for {current_song} by {current_artist}", color=discord.Color.purple())
+                chunks = [lyrics_text[i:i + 1024] for i in range(0, len(lyrics_text), 1024)] 
 
-        lyrics_text = await get_lyrics(song_title, artist_name)
-        if lyrics_text:
-            lyrics_preview = lyrics_text[:300] + "..."  # Limit preview to 300 characters
-            embed.add_field(name="Lyrics Preview", value=lyrics_preview, inline=False)
-            embed.set_footer(text="Use d/lyrics to see the full lyrics!")
-        else:
-            embed.add_field(name="Lyrics", value="No lyrics found.", inline=False)
-
-        await ctx.send(embed=embed)
+                for i, chunk in enumerate(chunks):
+                    embed.add_field(name=f"Lyrics (Part {i + 1})", value=chunk, inline=False)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send(f"Sorry, no lyrics were found for **{current_song}** by **{current_artist}**.")
+                
+        async def skip_button_callback(interaction):
+            vc.stop()
+            await interaction.response.send_message("fine we can skip")
+        
+        loop_button = Button(label = "Loop", style = discord.ButtonStyle.green)
+        loop_button.callback = loop_button_callback
+        
+        skip_button = Button(label = "Skip", style = discord.ButtonStyle.red)
+        skip_button.callback = skip_button_callback
+        
+        lyrics_button = Button(label = "Lyrics", style = discord.ButtonStyle.blurple)
+        lyrics_button.callback = lyrics_button_callback
+        
+        view = View()
+        view.add_item(loop_button)
+        view.add_item(skip_button)
+        view.add_item(lyrics_button)
+        await ctx.send(embed=embed, view=view)
 
     else:
         await asyncio.sleep(10)
