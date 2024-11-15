@@ -12,6 +12,7 @@ import requests
 import lyricsgenius
 import re
 from fuzzywuzzy import fuzz
+import functools
 from fuzzywuzzy import process
 from discord.ui import Button, View
 from YTDL import YTDLSource 
@@ -71,14 +72,20 @@ async def commands(ctx):
     await ctx.send(cmds)
     
 async def play_next(ctx, vc):
-    global looping
+    global looping, current_song, current_artist
 
     if not vc.is_connected():
         return
 
-    if not song_queue.empty():
-        source = await song_queue.get()
-        await ctx.send(f'queue size {song_queue.qsize()}')
+    if not song_queue.empty() or looping:
+        if not looping:
+            source = await song_queue.get()
+        else:
+            # Reuse the current source for looping
+            source = vc.source
+            if source is None:
+                source = await song_queue.get()
+
         def after_playing(error):
             coro = play_next(ctx, vc)
             fut = asyncio.run_coroutine_threadsafe(coro, ctx.bot.loop)
@@ -86,60 +93,79 @@ async def play_next(ctx, vc):
                 fut.result()
             except Exception as exc:
                 print(f'Error in after_playing: {exc}')
-                
 
         vc.play(source, after=after_playing)
-        artist_name, song_title = extract_artist_and_title(source.title)
-        if not artist_name:
-            artist_name = source.data.get('uploader')
-        track_length = source.duration
-        formatted_length = f"{divmod(track_length, 60)[0]}:{divmod(track_length, 60)[1]:02d}" if track_length else "Unknown length"
 
-        sources = await YTDLSource.create_source(current_song, loop=bot.loop)
-        if looping and song_queue.qsize() < 2:
-            for source in sources:
-                await song_queue.put(source)
-                
+        # Update current song and artist
+        current_song = getattr(source, 'title', 'Unknown')
+        current_artist = getattr(source, 'data', {}).get('uploader', 'Unknown')
+
+        # Extract artist and title for display
+        artist_name, song_title = extract_artist_and_title(current_song)
+        if not artist_name:
+            artist_name = current_artist
+
+        # Get track length and format it correctly
+        track_length = getattr(source, 'duration', None)
+        if track_length:
+            minutes, seconds = divmod(track_length, 60)
+            minutes = int(minutes)
+            seconds = int(seconds)
+            formatted_length = f"{minutes}:{seconds:02d}"
+        else:
+            formatted_length = "Unknown length"
+
+        # Prepare embed
         embed = discord.Embed(title="Now Playing", color=discord.Color.blue())
         embed.add_field(name="Song", value=song_title, inline=False)
         embed.add_field(name="Artist", value=artist_name, inline=False)
         embed.add_field(name="Duration", value=formatted_length, inline=False)
-        
+
+        # Define button callbacks
         async def loop_button_callback(interaction):
             global looping
             looping = not looping
             status = "enabled" if looping else "disabled"
             await interaction.response.send_message(f"Looping {status}.", ephemeral=True)
-        
+
         async def lyrics_button_callback(interaction):
-            global current_song, current_artist
             if current_song is None or current_artist is None:
-                await ctx.send("No song is currently playing.")
+                await interaction.response.send_message("No song is currently playing.", ephemeral=True)
                 return
             lyrics_text = await get_lyrics(current_song, current_artist)
             if lyrics_text:
-                embed = discord.Embed(title=f"Lyrics for {current_song} by {current_artist}", color=discord.Color.purple())
-                chunks = [lyrics_text[i:i + 1024] for i in range(0, len(lyrics_text), 1024)] 
-
+                lyrics_embed = discord.Embed(
+                    title=f"Lyrics for {current_song} by {current_artist}",
+                    color=discord.Color.purple()
+                )
+                chunks = [lyrics_text[i:i + 1024] for i in range(0, len(lyrics_text), 1024)]
                 for i, chunk in enumerate(chunks):
-                    embed.add_field(name=f"Lyrics (Part {i + 1})", value=chunk, inline=False)
-                await ctx.send(embed=embed)
+                    lyrics_embed.add_field(name=f"Lyrics (Part {i + 1})", value=chunk, inline=False)
+                await interaction.response.send_message(embed=lyrics_embed, ephemeral=True)
             else:
-                await ctx.send(f"Sorry, no lyrics were found for **{current_song}** by **{current_artist}**.")
-                
+                await interaction.response.send_message(
+                    f"Sorry, no lyrics were found for **{current_song}** by **{current_artist}**.",
+                    ephemeral=True
+                )
+
         async def skip_button_callback(interaction):
-            vc.stop()
-            await interaction.response.send_message("fine we can skip")
-        
-        loop_button = Button(label = "Loop", style = discord.ButtonStyle.green)
+            if vc.is_playing():
+                vc.stop()
+                await interaction.response.send_message("Skipped the current song.", ephemeral=True)
+            else:
+                await interaction.response.send_message("No song is currently playing.", ephemeral=True)
+
+        # Create buttons
+        loop_button = Button(label="Loop", style=discord.ButtonStyle.green)
         loop_button.callback = loop_button_callback
-        
-        skip_button = Button(label = "Skip", style = discord.ButtonStyle.red)
+
+        skip_button = Button(label="Skip", style=discord.ButtonStyle.red)
         skip_button.callback = skip_button_callback
-        
-        lyrics_button = Button(label = "Lyrics", style = discord.ButtonStyle.blurple)
+
+        lyrics_button = Button(label="Lyrics", style=discord.ButtonStyle.blurple)
         lyrics_button.callback = lyrics_button_callback
-        
+
+        # Send the embed with buttons
         view = View()
         view.add_item(loop_button)
         view.add_item(skip_button)
@@ -152,10 +178,10 @@ async def play_next(ctx, vc):
             await vc.disconnect()
             await ctx.send("No more tracks. Disconnecting...")
 
+
+
 @bot.command()
 async def p(ctx, *, search: str):
-    global current_song, current_artist
-
     voice_channel = ctx.author.voice.channel
     if not voice_channel:
         await ctx.send("You're not in a voice channel!")
@@ -166,22 +192,125 @@ async def p(ctx, *, search: str):
         vc = ctx.voice_client
         if vc.channel != voice_channel:
             await vc.move_to(voice_channel)
-    
-    sources = await YTDLSource.create_source(search, loop=bot.loop)
 
-    for source in sources:
-        track_length = source.duration
-        if track_length:
-            minutes, seconds = divmod(track_length, 60)
-            formatted_length = f"{minutes}:{seconds:02d}"
+    input_type = identify_link_type(search)
+
+    if input_type == 'spotify':
+        await handle_spotify_link(ctx, search, vc)
+    elif input_type == 'soundcloud':
+        await handle_soundcloud_link(ctx, search, vc)
+    elif input_type == 'apple_music':
+        await handle_apple_music_link(ctx, search, vc)
+    elif input_type == 'youtube':
+        await handle_youtube_link(ctx, search, vc)
+    else:
+        await handle_search_query(ctx, search, vc)
+
+            
+def identify_link_type(input_str):
+    if re.match(r'https?://open\.spotify\.com/', input_str):
+        return 'spotify'
+    elif re.match(r'https?://(www\.)?soundcloud\.com/', input_str):
+        return 'soundcloud'
+    elif re.match(r'https?://music\.apple\.com/', input_str):
+        return 'apple_music'
+    elif re.match(r'https?://(www\.)?(youtube\.com|youtu\.be)/', input_str):
+        return 'youtube'
+    else:
+        return 'search'
+
+async def handle_spotify_link(ctx, link: str, vc):
+    # Extract the type of Spotify link (track, album, playlist)
+    if "track" in link:
+        track_id = link.split("/")[-1].split("?")[0]
+        track = spotify.track(track_id)
+        await enqueue_track(ctx, track, vc)
+        await ctx.send(f"Added track **{track['name']}** to the queue.")
+    elif "album" in link:
+        album_id = link.split("/")[-1].split("?")[0]
+        results = spotify.album_tracks(album_id)
+        tracks = results['items']
+        await enqueue_tracks(ctx, tracks, vc)
+        await ctx.send(f"Added album **{spotify.album(album_id)['name']}** to the queue.")
+    elif "playlist" in link:
+        playlist_id = link.split("/")[-1].split("?")[0]
+        results = spotify.playlist_tracks(playlist_id)
+        tracks = [item['track'] for item in results['items']]
+        await enqueue_tracks(ctx, tracks, vc)
+        await ctx.send(f"Added playlist **{spotify.playlist(playlist_id)['name']}** to the queue.")
+    else:
+        await ctx.send("Unsupported Spotify link.")
+
+async def handle_soundcloud_link(ctx, link: str, vc):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'ignoreerrors': True,
+        'quiet': True,
+        'default_search': 'auto',
+        'source_address': '0.0.0.0',
+    }
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(link, download=False)
+        if 'entries' in info:
+            entries = info['entries']
         else:
-            formatted_length = "Unknown length"
-        await song_queue.put(source)
-        current_song = source.title 
-        current_artist = source.data.get('uploader')
+            entries = [info]
 
-        if not vc.is_playing():
+        for entry in entries:
+            sources = await YTDLSource.create_source(entry['webpage_url'], loop=bot.loop)
+            for source in sources:
+                await song_queue.put(source)
+                if not vc.is_playing() and not vc.is_paused():
+                    await play_next(ctx, vc)
+    await ctx.send("Added SoundCloud content to the queue.")
+
+async def handle_apple_music_link(ctx, link: str, vc):
+    await ctx.send("Attempting to find the song on YouTube...")
+
+    # Extract song title and artist from the link using regex
+    match = re.search(r'music\.apple\.com/.+?/(.+?)/(.+)', link)
+    if match:
+        artist = match.group(1).replace('-', ' ')
+        song = match.group(2).split('?')[0].replace('-', ' ')
+        search_query = f"{song} {artist}"
+    else:
+        search_query = link  # Use the link itself as the search query
+
+    await handle_search_query(ctx, search_query, vc)
+    
+async def handle_youtube_link(ctx, link: str, vc):
+    sources = await YTDLSource.create_source(link, loop=bot.loop)
+    for source in sources:
+        await song_queue.put(source)
+        if not vc.is_playing() and not vc.is_paused():
             await play_next(ctx, vc)
+    await ctx.send("Added YouTube content to the queue.")
+
+
+async def handle_search_query(ctx, query: str, vc):
+    sources = await YTDLSource.create_source(query, loop=bot.loop)
+    for source in sources:
+        await song_queue.put(source)
+        if not vc.is_playing() and not vc.is_paused():
+            await play_next(ctx, vc)
+    await ctx.send(f"Added '{query}' to the queue.")
+
+async def enqueue_track(ctx, track, vc):
+    track_name = track['name']
+    artists = ', '.join([artist['name'] for artist in track['artists']])
+    search_query = f"{track_name} {artists}"
+
+    sources = await YTDLSource.create_source(search_query, loop=bot.loop)
+    for source in sources:
+        await song_queue.put(source)
+        if not vc.is_playing() and not vc.is_paused():
+            await play_next(ctx, vc)
+
+async def enqueue_tracks(ctx, tracks, vc):
+    for track in tracks:
+        await enqueue_track(ctx, track, vc)
+
 
 @bot.command()
 async def loop(ctx):
@@ -376,133 +505,6 @@ async def skip(ctx):
     except asyncio.TimeoutError:
         await ctx.send("Vote timed out. The song will continue playing.")
 
-@bot.command()
-async def spotifyplay(ctx, link: str):
-    voice_channel = ctx.author.voice.channel
-    if not voice_channel:
-        await ctx.send("You're not in a voice channel!")
-        return
 
-    vc = ctx.voice_client
-    if vc is None:
-        vc = await voice_channel.connect()
-        
-    if "track" in link:
-        track_id = link.split("/")[-1].split("?")[0]
-        track = spotify.track(track_id)
-        track_name = track['name']
-        artists = ', '.join([artist['name'] for artist in track['artists']])
-        search_query = f"{track_name} {artists}"
-
-        sources = await YTDLSource.create_source(search_query, loop=bot.loop)
-        for source in sources:
-            await song_queue.put(source)
-            await play_next(ctx, vc)
-
-    elif "album" in link:
-        album_id = link.split("/")[-1].split("?")[0]
-        results = spotify.album_tracks(album_id)
-        tracks = results['items']
-
-        async def download_and_play_track(track_item):
-            track = track_item
-            track_name = track['name']
-            artists = ', '.join([artist['name'] for artist in track['artists']])
-            search_query = f"{track_name} {artists}"
-
-            sources = await YTDLSource.create_source(search_query, loop=bot.loop)
-            for source in sources:
-                await song_queue.put(source)
-                if not vc.is_playing(): 
-                    await play_next(ctx, vc)
-                while vc.is_playing():
-                    await asyncio.sleep(1)
-
-
-        for item in tracks:
-            await download_and_play_track(item)
-            
-    elif "playlist" in link:
-        playlist_id = link.split("/")[-1].split("?")[0]
-        results = spotify.playlist_tracks(playlist_id)
-        tracks = results['items']
-
-        async def download_and_play_track(track_item):
-            track = track_item['track']
-            track_name = track['name']
-            artists = ', '.join([artist['name'] for artist in track['artists']])
-            search_query = f"{track_name} {artists}"
-
-            sources = await YTDLSource.create_source(search_query, loop=bot.loop)
-            for source in sources:
-                await song_queue.put(source)
-                if not vc.is_playing(): 
-                    await play_next(ctx, vc)
-                while vc.is_playing():
-                    await asyncio.sleep(1)
-
-        for item in tracks:
-            await download_and_play_track(item)
-    
-
-
-@bot.command()
-async def soundcloudplay(ctx, playlist_url: str):
-    voice_channel = ctx.author.voice.channel
-    if not voice_channel:
-        await ctx.send("You're not in a voice channel!")
-        return
-
-    vc = ctx.voice_client
-    if vc is None:
-        vc = await voice_channel.connect()
-
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'ignoreerrors': True,
-        'nocheckcertificate': True,
-        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-    }
-
-    try:
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(playlist_url, download=False)
-
-            async def download_and_play_track(track_info):
-                try:
-                    stream_url = track_info['url']
-                    vc.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=stream_url))
-                    await ctx.send(f"Now streaming SoundCloud track: {track_info['title']}")
-
-                    while vc.is_playing():
-                        await asyncio.sleep(1)
-
-                    info = ydl.extract_info(track_info['webpage_url'], download=True)
-                    file_path = ydl.prepare_filename(info).replace('.webm', '.mp3').replace('.m4a', '.mp3')
-                    await song_queue.put(file_path)
-                    await play_next(ctx, vc)
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    await ctx.send(f"Downloaded and played: {track_info['title']}")
-                except youtube_dl.utils.DownloadError as e:
-                    await ctx.send(f"An error occurred while downloading '{track_info['title']}': {str(e)}")
-                except Exception as e:
-                    await ctx.send(f"An error occurred: {str(e)}")
-
-            if 'entries' in info:
-                for track_info in info['entries']:
-                    await download_and_play_track(track_info)
-            else:
-                await download_and_play_track(info)
-
-    except youtube_dl.utils.DownloadError as e:
-        await ctx.send(f"An error occurred: {str(e)}")
-    except Exception as e:
-        await ctx.send(f"An error occurred: {str(e)}")
 
 bot.run(BOT_TOKEN)

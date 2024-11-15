@@ -2,6 +2,7 @@ import asyncio
 import yt_dlp as youtube_dl  # Use yt-dlp instead of youtube_dl
 import discord
 from discord.ext import commands
+import os
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -16,14 +17,15 @@ class YTDLSource(discord.PCMVolumeTransformer):
         'quiet': True,
         'no_warnings': True,
         'default_search': 'auto',
-        'source_address': '0.0.0.0'
+        'ignoreerrors': True,
+        'source_address': '0.0.0.0',
+        'cachedir': os.path.join(os.getcwd(), 'data/ytdl_cache'),
     }
 
     ffmpeg_options = {
-        'options': '-vn',
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+        'options': '-vn -bufsize 64k',
+        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin'
     }
-
     ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
     def __init__(self, data, *, volume=0.5):
@@ -40,11 +42,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def create_source(cls, search: str, *, loop=None, volume=0.5):
         loop = loop or asyncio.get_event_loop()
-
-        # Extract information from YouTube (or other sources supported by yt-dlp)
         data = await loop.run_in_executor(None, lambda: cls.ytdl.extract_info(search, download=False))
 
-        # If a playlist, return a list of sources, otherwise return a single source
         if 'entries' in data:
             return [cls(entry, volume=volume) for entry in data['entries']]
         else:
